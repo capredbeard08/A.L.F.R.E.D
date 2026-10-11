@@ -19,6 +19,8 @@ from pathlib import Path
 
 from . import __version__, runtime
 from .runtime import AlfredError, DEFAULT_MODEL
+from .tools import search as search_tool
+from .tools.search import PROVIDERS, SearchError
 
 PROMPT_FILENAME = runtime.DEFAULT_PROMPT_FILENAME
 
@@ -117,6 +119,18 @@ def _cmd_env(args: argparse.Namespace) -> int:
             "fallback_env_var": None,
             "value": env.get(runtime.ENV_MODEL) or DEFAULT_MODEL,
         },
+        "search_api_key": {
+            "env_var": runtime.ENV_TAVILY_API_KEY,
+            "fallback_env_var": runtime.ENV_SEARCH_API_KEY,
+            "set": bool((env.get(runtime.ENV_TAVILY_API_KEY) or env.get(runtime.ENV_SEARCH_API_KEY) or "").strip()),
+            "value": "(hidden)" if (env.get(runtime.ENV_TAVILY_API_KEY) or env.get(runtime.ENV_SEARCH_API_KEY)) else "(unset)",
+        },
+        "search_provider": {
+            "resolved": search_tool.available_provider(
+                (env.get(runtime.ENV_TAVILY_API_KEY) or env.get(runtime.ENV_SEARCH_API_KEY) or "").strip() or None
+            ),
+            "available": list(PROVIDERS),
+        },
     }
     json.dump(report, sys.stdout, indent=2)
     sys.stdout.write("\n")
@@ -128,8 +142,99 @@ def _prepare() -> tuple[str, runtime.Settings]:
     return prompt, runtime.resolve_settings()
 
 
+def _grounded_system_prompt(prompt: str, question: str, settings: runtime.Settings,
+                            max_results: int) -> tuple[str, list[search_tool.SearchResult], str]:
+    """Run a live search and fold the results into the system prompt."""
+    provider = search_tool.available_provider(settings.search_api_key)
+    results = search_tool.search(
+        question,
+        api_key=settings.search_api_key,
+        provider=provider,
+        max_results=max_results,
+    )
+    block = search_tool.build_grounding_block(results, question, provider)
+    return prompt + "\n\n" + block, results, provider
+
+
+def _cmd_search(args: argparse.Namespace) -> int:
+    settings = runtime.resolve_settings(require_api_key=False)
+    provider = args.provider or search_tool.available_provider(settings.search_api_key)
+    results = search_tool.search(
+        args.query,
+        api_key=settings.search_api_key,
+        provider=provider,
+        max_results=args.max_results,
+    )
+    if args.json:
+        json.dump(
+            {
+                "query": args.query,
+                "provider": provider,
+                "results": [
+                    {
+                        "title": r.title,
+                        "url": r.url,
+                        "snippet": r.snippet,
+                        "score": r.score,
+                        "published": r.published,
+                    }
+                    for r in results
+                ],
+            },
+            sys.stdout,
+            indent=2,
+        )
+        sys.stdout.write("\n")
+    else:
+        sys.stdout.write(search_tool.format_brief(results, args.query) + "\n")
+    return 0
+
+
+def _cmd_research(args: argparse.Namespace) -> int:
+    if args.ask:
+        prompt, settings = _prepare()
+    else:
+        # Retrieval-only mode needs no LLM key: only the optional search key matters.
+        prompt, settings = "", runtime.resolve_settings(require_api_key=False)
+
+    provider = search_tool.available_provider(settings.search_api_key)
+    results = search_tool.search(
+        args.query,
+        api_key=settings.search_api_key,
+        provider=provider,
+        max_results=args.max_results,
+    )
+
+    if not args.ask:
+        # Retrieval only: hand back the cited sources without spending a model call.
+        sys.stdout.write(search_tool.format_brief(results, args.query) + f"\n(provider: {provider})\n")
+        return 0
+
+    grounded = prompt + "\n\n" + search_tool.build_grounding_block(results, args.query, provider)
+    messages = [
+        {"role": "system", "content": grounded},
+        {"role": "user", "content": (
+            f"Research and brief me on: {args.query}\n\n"
+            "Open with BLUF. Cite sources inline as [1], [2]. Close with a short "
+            "source list using the exact URLs you were given."
+        )},
+    ]
+    reply = runtime.chat_messages(messages, settings)
+    sys.stdout.write(reply + "\n")
+    if args.json:
+        json.dump(
+            {"query": args.query, "provider": provider,
+             "sources": [{"title": r.title, "url": r.url} for r in results]},
+            sys.stderr, indent=2,
+        )
+        sys.stderr.write("\n")
+    return 0
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
     prompt, settings = _prepare()
+    if args.web:
+        prompt, _results, _provider = _grounded_system_prompt(prompt, args.prompt, settings, args.max_results)
     reply = runtime.chat(args.prompt, prompt, settings)
     sys.stdout.write(reply + "\n")
     return 0
@@ -181,8 +286,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_env = sub.add_parser("env", help="show the configuration contract")
     p_env.set_defaults(func=_cmd_env)
 
+    p_search = sub.add_parser("search", help="run a live web query and print cited results")
+    p_search.add_argument("query")
+    p_search.add_argument("--max-results", type=int, default=search_tool.DEFAULT_MAX_RESULTS)
+    p_search.add_argument("--provider", choices=PROVIDERS, default=None)
+    p_search.add_argument("--json", action="store_true")
+    p_search.set_defaults(func=_cmd_search)
+
+    p_research = sub.add_parser("research", help="search, then optionally brief via the model")
+    p_research.add_argument("query")
+    p_research.add_argument("--ask", action="store_true", help="synthesize a cited brief (needs an API key)")
+    p_research.add_argument("--max-results", type=int, default=search_tool.DEFAULT_MAX_RESULTS)
+    p_research.add_argument("--json", action="store_true", help="also emit sources as JSON on stderr")
+    p_research.set_defaults(func=_cmd_research)
+
     p_ask = sub.add_parser("ask", help="one-shot question (requires an API key)")
     p_ask.add_argument("prompt", help="the question to send")
+    p_ask.add_argument("--web", action="store_true", help="ground the answer in a live web search first")
+    p_ask.add_argument("--max-results", type=int, default=search_tool.DEFAULT_MAX_RESULTS)
     p_ask.set_defaults(func=_cmd_ask)
 
     p_chat = sub.add_parser("chat", help="interactive session (requires an API key)")
@@ -196,6 +317,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
+    except SearchError as exc:
+        print(f"search error: {exc}", file=sys.stderr)
+        return 2
     except AlfredError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

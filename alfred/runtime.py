@@ -24,6 +24,8 @@ DEFAULT_TIMEOUT_SECONDS = 60.0
 ENV_API_KEY = "ALFRED_API_KEY"
 ENV_API_BASE = "ALFRED_API_BASE"
 ENV_MODEL = "ALFRED_MODEL"
+ENV_SEARCH_API_KEY = "SEARCH_API_KEY"
+ENV_TAVILY_API_KEY = "TAVILY_API_KEY"
 
 
 class AlfredError(Exception):
@@ -46,14 +48,15 @@ class UpstreamError(AlfredError):
 class Settings:
     """Resolved runtime configuration.
 
-    `api_key` uses `field(repr=False)` so the secret can never surface in a log
-    line, traceback, or interactive inspection of this object.
+    Both secrets use `field(repr=False)` so neither can surface in a log line,
+    traceback, or interactive inspection of this object.
     """
 
     api_key: str = field(repr=False)
     api_base: str
     model: str
     timeout_seconds: float
+    search_api_key: str | None = field(default=None, repr=False)
 
 
 def find_repo_root(start: Path | None = None) -> Path:
@@ -95,13 +98,15 @@ def resolve_settings(
     api_base: str | None = None,
     model: str | None = None,
     timeout_seconds: float | None = None,
+    search_api_key: str | None = None,
     environ: dict[str, str] | None = None,
+    require_api_key: bool = True,
 ) -> Settings:
     """Resolve settings from explicit arguments, then environment. Never logs secrets."""
     env = os.environ if environ is None else environ
 
     key = (api_key or env.get(ENV_API_KEY) or env.get("OPENAI_API_KEY") or "").strip()
-    if not key:
+    if not key and require_api_key:
         raise ConfigError(
             f"No API key. Set {ENV_API_KEY} (or OPENAI_API_KEY) in your environment."
         )
@@ -115,11 +120,23 @@ def resolve_settings(
     if not resolved_model:
         raise ConfigError(f"{ENV_MODEL} resolved to an empty model name.")
 
+    search_key = (search_api_key or "").strip() or None
+
     timeout = timeout_seconds if timeout_seconds is not None else DEFAULT_TIMEOUT_SECONDS
     if timeout <= 0:
         raise ConfigError("timeout must be positive.")
 
-    return Settings(api_key=key, api_base=base, model=resolved_model, timeout_seconds=timeout)
+    resolved_search_key = (
+        search_key or env.get(ENV_TAVILY_API_KEY) or env.get(ENV_SEARCH_API_KEY) or ""
+    ).strip() or None
+
+    return Settings(
+        api_key=key,
+        api_base=base,
+        model=resolved_model,
+        timeout_seconds=timeout,
+        search_api_key=resolved_search_key,
+    )
 
 
 def build_messages(system_prompt: str, user_text: str) -> list[dict[str, str]]:
@@ -134,11 +151,29 @@ def chat(user_text: str, system_prompt: str, settings: Settings) -> str:
     """Send one turn and return the assistant reply. Raises UpstreamError on failure."""
     if not user_text.strip():
         raise ConfigError("Cannot send an empty user message.")
+    return chat_messages(build_messages(system_prompt, user_text), settings)
+
+
+def chat_messages(messages: list[dict[str, str]], settings: Settings) -> str:
+    """Send a prebuilt message list and return the assistant reply.
+
+    This is the generalised entry point for tool-augmented turns: callers can
+    inject retrieved context into the system message and post-process the
+    reply, while transport, timeout, and error handling stay in one place.
+    """
+    if not messages:
+        raise ConfigError("Cannot send an empty message list.")
+    if not settings.api_key:
+        raise ConfigError(
+            f"No API key. Set {ENV_API_KEY} (or OPENAI_API_KEY) in your environment."
+        )
+    if any(not isinstance(m, dict) or m.get("role") not in ("system", "user", "assistant") for m in messages):
+        raise ConfigError("Each message needs role in {system, user, assistant}.")
 
     payload = json.dumps(
         {
             "model": settings.model,
-            "messages": build_messages(system_prompt, user_text),
+            "messages": messages,
             "temperature": 0.2,
         }
     ).encode("utf-8")

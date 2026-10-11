@@ -52,11 +52,26 @@ class BuildTests(unittest.TestCase):
                 self.assertTrue(path.is_file(), f"missing: {path}")
                 self.assertTrue(path.read_text(encoding="utf-8").strip(), f"empty: {path}")
 
-    def test_domain_modules_cover_all_five_domains(self) -> None:
-        domains = sorted(
-            p.name for p in (builder.PROMPTS_DIR / "domains").glob("*.md")
-        )
-        self.assertEqual(len(domains), 5, f"expected 5 domains, found {domains}")
+    def test_domain_modules_cover_all_domains(self) -> None:
+        domains = sorted(p.name for p in (builder.PROMPTS_DIR / "domains").glob("*.md"))
+        # One module per numbered domain section; adding one requires updating
+        # MODULES, REQUIRED_MARKERS, and this set together.
+        expected = {
+            "business_corporate_strategy.md",
+            "data_systems_engineering.md",
+            "financial_capital_allocation.md",
+            "governance_intelligence.md",
+            "hardware_fabrication.md",
+            "tools_and_research.md",
+        }
+        self.assertEqual(set(domains), expected, f"domain set drifted: {domains}")
+
+    def test_every_module_is_registered_in_modules(self) -> None:
+        on_disk = {
+            str(p.relative_to(builder.PROMPTS_DIR))
+            for p in builder.PROMPTS_DIR.rglob("*.md")
+        }
+        self.assertEqual(on_disk, set(builder.MODULES), "unregistered or missing prompt module")
 
     def test_assemble_is_deterministic(self) -> None:
         self.assertEqual(builder.assemble(), builder.assemble())
@@ -267,8 +282,8 @@ class CliTests(unittest.TestCase):
         code, out, _ = self._run(["stats", "--json"])
         self.assertEqual(code, 0)
         data = json.loads(out)
-        self.assertEqual(data["source_modules"], 9)
-        self.assertEqual(len(data["modules"]), 9)
+        self.assertEqual(data["source_modules"], len(builder.MODULES))
+        self.assertEqual(len(data["modules"]), len(builder.MODULES))
         self.assertGreater(data["estimated_tokens"], 0)
 
     def test_build_check_passes(self) -> None:
