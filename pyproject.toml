@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alfred-runtime"
+version = "1.0.0"
+description = "A.L.F.R.E.D. modular prompt assets and a thin, dependency-free LLM runtime."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+alfred = "alfred.cli:main"
+
+[tool.setuptools]
+packages = ["alfred"]
