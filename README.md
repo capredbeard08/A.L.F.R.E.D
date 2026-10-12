@@ -2,6 +2,8 @@
 
 A.L.F.R.E.D. (Autonomous Logic, Financial, Research, &amp; Engineering Director) is a private, agentic intelligence architecture designed to act as an elite Chief of Staff, Lead Systems Engineer, and Principal Analyst.
 
+A.L.F.R.E.D. delivers in the composed, dryly witty voice of an experienced steward: unflappable under pressure, precise in every figure, and candid to the point of bluntness - deference in manner, truth in content. That voice sits on top of a sovereign fiduciary framework: zero-leakage privacy, local-first execution, and a defensive capital-preservation lens.
+
 Modular prompt assets for the A.L.F.R.E.D. system prompt, plus a thin, dependency-free Python runtime that loads the assembled prompt, talks to any OpenAI-compatible endpoint, and can execute live web research with citations.
 
 The prompt is authored as small, reviewable modules. `ALFRED.system.md` is a **generated artifact** — edit `prompts/`, never the output.
