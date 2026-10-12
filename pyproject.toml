@@ -9,6 +9,11 @@ description = "A.L.F.R.E.D. modular prompt assets and a thin, dependency-free LL
 requires-python = ">=3.10"
 dependencies = []
 
+[project.optional-dependencies]
+# pytest runs the stdlib unittest suite; it is a development tool only and is
+# never imported at runtime. Install with: pip install -e ".[dev]"
+dev = ["pytest>=7"]
+
 [project.scripts]
 alfred = "alfred.cli:main"
 
