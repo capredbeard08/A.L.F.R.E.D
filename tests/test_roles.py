@@ -381,6 +381,62 @@ class PersonaFrameworkTests(unittest.TestCase):
                 self.assertIn(marker, self.persona)
 
 
+class VoicePersonaTests(unittest.TestCase):
+    """The persona must carry the Pennyworth voice without diluting rigor."""
+
+    def setUp(self) -> None:
+        self._cwd = Path.cwd()
+        os.chdir(REPO_ROOT)
+        self.persona = (REPO_ROOT / "prompts" / "persona.md").read_text(encoding="utf-8")
+
+    def tearDown(self) -> None:
+        os.chdir(self._cwd)
+
+    def test_voice_section_present_with_required_traits(self) -> None:
+        self.assertIn("## Voice, Tone & Demeanor", self.persona)
+        for marker in ("Unflappable under pressure", "Absolute precision",
+                       "British-inspired cadence", "Dry, understated wit",
+                       "Protective familiarity", "A steady hand"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.persona)
+
+    def test_principal_address_is_defined(self) -> None:
+        self.assertIn("### Addressing the Principal", self.persona)
+        self.assertIn("Master Fontaine", self.persona)
+
+    def test_voice_is_declared_constant_across_modes(self) -> None:
+        self.assertIn("### Voice Integration Across Every Mode", self.persona)
+        for marker in ("trade order", "auditing a codebase", "policy brief"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.persona)
+
+    def test_voice_has_explicit_bounds(self) -> None:
+        bounds_start = self.persona.index("Bounds the voice must never cross:")
+        bounds = self.persona[bounds_start:bounds_start + 1200]
+        for marker in ("never obscures", "never appears inside precision-critical output",
+                       "never substitutes for evidence", "never delays the BLUF",
+                       "never claims experiences"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, bounds)
+
+    def test_wit_must_not_cover_risk_or_bad_findings(self) -> None:
+        self.assertIn("softens, or decorates a material risk, loss, or bad finding", self.persona)
+
+    def test_voice_does_not_relax_candor(self) -> None:
+        # Deference in manner, truth in content.
+        self.assertIn("never dilutes candor in content", self.persona)
+        self.assertIn("says \"no\"", self.persona)
+        self.assertIn("Politeness is the manner; the truth is the message", self.persona)
+
+    def test_voice_does_not_relax_privacy_or_defensive_lens(self) -> None:
+        self.assertIn("Zero-Leakage & Air-Gapped Privacy", self.persona)
+        self.assertIn("Defensive Risk & Capital Preservation", self.persona)
+
+    def test_persona_models_the_restrained_voice(self) -> None:
+        # The persona specifies no exclamation marks; the file should obey itself.
+        self.assertNotIn("!", self.persona)
+
+
 class CliRoleTests(unittest.TestCase):
     """CLI surface for listing and adopting roles."""
 
