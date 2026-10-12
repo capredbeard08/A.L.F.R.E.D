@@ -21,6 +21,7 @@ from . import __version__, runtime
 from .runtime import AlfredError, DEFAULT_MODEL
 from .tools import search as search_tool
 from .tools.search import PROVIDERS, SearchError
+from . import roles as roles_mod
 
 PROMPT_FILENAME = runtime.DEFAULT_PROMPT_FILENAME
 
@@ -137,9 +138,40 @@ def _cmd_env(args: argparse.Namespace) -> int:
     return 0
 
 
-def _prepare() -> tuple[str, runtime.Settings]:
+def _prepare(role: str | None = None) -> tuple[str, runtime.Settings]:
+    """Load the system prompt, adopting a professional role if one was given."""
     prompt = runtime.load_system_prompt()
+    if role:
+        prompt = roles_mod.apply_role(prompt, role)
     return prompt, runtime.resolve_settings()
+
+
+def _cmd_roles(args: argparse.Namespace) -> int:
+    if args.show:
+        sys.stdout.write(roles_mod.get_role(args.show) + "\n")
+        return 0
+
+    grouped = roles_mod.categories()
+    if args.category:
+        wanted = args.category.strip().lower()
+        grouped = {k: v for k, v in grouped.items() if k.lower() == wanted}
+        if not grouped:
+            known = ", ".join(sorted(roles_mod.categories()))
+            print(f"error: unknown category {args.category!r}. Known: {known}", file=sys.stderr)
+            return 1
+
+    total = sum(len(v) for v in grouped.values())
+    if args.json:
+        json.dump({"total": total, "categories": grouped}, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 0
+
+    for category in sorted(grouped):
+        print(f"{category} ({len(grouped[category])})")
+        for role_id in grouped[category]:
+            print(f"  {role_id:<32} {roles_mod.role_title(role_id)}")
+    print(f"\n{total} roles. Use --role <id>, or: alfred roles --show <id>")
+    return 0
 
 
 def _grounded_system_prompt(prompt: str, question: str, settings: runtime.Settings,
@@ -192,7 +224,7 @@ def _cmd_search(args: argparse.Namespace) -> int:
 
 def _cmd_research(args: argparse.Namespace) -> int:
     if args.ask:
-        prompt, settings = _prepare()
+        prompt, settings = _prepare(args.role)
     else:
         # Retrieval-only mode needs no LLM key: only the optional search key matters.
         prompt, settings = "", runtime.resolve_settings(require_api_key=False)
@@ -232,7 +264,7 @@ def _cmd_research(args: argparse.Namespace) -> int:
 
 
 def _cmd_ask(args: argparse.Namespace) -> int:
-    prompt, settings = _prepare()
+    prompt, settings = _prepare(args.role)
     if args.web:
         prompt, _results, _provider = _grounded_system_prompt(prompt, args.prompt, settings, args.max_results)
     reply = runtime.chat(args.prompt, prompt, settings)
@@ -241,7 +273,7 @@ def _cmd_ask(args: argparse.Namespace) -> int:
 
 
 def _cmd_chat(args: argparse.Namespace) -> int:
-    prompt, settings = _prepare()
+    prompt, settings = _prepare(args.role)
     print(f"A.L.F.R.E.D. ready | model={settings.model} | Ctrl-D to exit.", file=sys.stderr)
     while True:
         try:
@@ -298,16 +330,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_research.add_argument("--ask", action="store_true", help="synthesize a cited brief (needs an API key)")
     p_research.add_argument("--max-results", type=int, default=search_tool.DEFAULT_MAX_RESULTS)
     p_research.add_argument("--json", action="store_true", help="also emit sources as JSON on stderr")
+    p_research.add_argument("--role", default=None, help="adopt a professional role (see: alfred roles)")
     p_research.set_defaults(func=_cmd_research)
 
     p_ask = sub.add_parser("ask", help="one-shot question (requires an API key)")
     p_ask.add_argument("prompt", help="the question to send")
     p_ask.add_argument("--web", action="store_true", help="ground the answer in a live web search first")
+    p_ask.add_argument("--role", default=None, help="adopt a professional role (see: alfred roles)")
     p_ask.add_argument("--max-results", type=int, default=search_tool.DEFAULT_MAX_RESULTS)
     p_ask.set_defaults(func=_cmd_ask)
 
     p_chat = sub.add_parser("chat", help="interactive session (requires an API key)")
+    p_chat.add_argument("--role", default=None, help="adopt a professional role (see: alfred roles)")
     p_chat.set_defaults(func=_cmd_chat)
+
+    p_roles = sub.add_parser("roles", help="list or inspect the professional role taxonomy")
+    p_roles.add_argument("--category", default=None, help="filter by category, e.g. Advisor")
+    p_roles.add_argument("--show", default=None, metavar="ROLE_ID", help="print one role block")
+    p_roles.add_argument("--json", action="store_true")
+    p_roles.set_defaults(func=_cmd_roles)
 
     return parser
 

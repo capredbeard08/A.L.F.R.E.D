@@ -63,6 +63,7 @@ class BuildTests(unittest.TestCase):
             "governance_intelligence.md",
             "hardware_fabrication.md",
             "tools_and_research.md",
+            "07_roles.md",
         }
         self.assertEqual(set(domains), expected, f"domain set drifted: {domains}")
 

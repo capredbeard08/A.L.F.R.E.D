@@ -18,6 +18,7 @@ prompts/
     hardware_fabrication.md           # 2.4
     governance_intelligence.md        # 2.5
     tools_and_research.md             # 2.6 web tools vs offline reasoning, citation rules
+    07_roles.md                       # 2.7 professional role taxonomy (69 roles)
   bluf_protocol.md                    # 3. Executive communication protocol
   code_tool_execution.md              # 4. Code & tool execution rules
   tone.md                             # 5. Default tone & character
@@ -26,11 +27,13 @@ ALFRED.system.md                      # GENERATED — do not hand-edit
 alfred/
   runtime.py                          # prompt loader + stdlib LLM client + Settings
   cli.py                              # command-line interface
+  roles.py                            # role registry parser and prompt compiler
   tools/
     search.py                         # multi-provider web search tool
 tests/
   test_alfred.py                      # prompt + runtime tests
   test_search.py                      # tool, settings, and CLI tests
+  test_roles.py                       # role taxonomy loading, switching, compilation
 ```
 
 ## Requirements
@@ -56,6 +59,9 @@ python3 -m alfred stats            # sizes + rough token estimate
 python3 -m alfred env              # configuration contract (never prints secrets)
 python3 -m alfred ask "question"   # one-shot; requires an API key
 python3 -m alfred chat             # interactive session; requires an API key
+python3 -m alfred roles            # list the professional role taxonomy
+python3 -m alfred roles --category Advisor
+python3 -m alfred roles --show advisor-tax
 ```
 
 ### Tool execution
@@ -69,6 +75,24 @@ python3 -m alfred ask "what changed in Python 3.12?" --web           # ground a 
 ```
 
 `build`, `show`, `stats`, `env`, `search`, `research` (without `--ask`), and `--version` all work offline with no LLM API key.
+
+### Professional roles
+
+A.L.F.R.E.D. can adopt one of 69 professional roles across ten categories —
+Strategist, Advisor, Consultant, Specialist, Associate, Planner, Officer,
+Researcher, Architect, and Auditor/Controller. A role changes the lens,
+methodology, and output format; it never relaxes BLUF, citation, or honesty rules.
+
+```bash
+python3 -m alfred ask "review this cap table" --role associate-investment-banking
+python3 -m alfred chat --role architect-security
+python3 -m alfred research "semiconductor export controls" --ask --role advisor-policy
+```
+
+Roles are defined in `prompts/domains/07_roles.md`, one `### role: <id>` block per
+role, and compiled into the built prompt. `--role` inserts an activation note
+rather than repeating the definition, so switching roles stays cheap. Unknown ids
+fail with the nearest valid suggestions.
 
 ## Configuration
 
@@ -101,7 +125,8 @@ Override per call with `--provider {tavily,duckduckgo,urllib}`.
 python3 -m unittest discover -s tests -v
 ```
 
-80 tests, stdlib only, no network. They cover assembler determinism, module coverage, artifact freshness, prompt-vs-tool routing, DuckDuckGo HTML parsing against a captured fixture, Tavily request/response shape, every error path, and the guarantee that both secrets never reach stdout.
+126 tests, stdlib only, no network. They cover assembler determinism, module coverage, artifact freshness, prompt-vs-tool routing, DuckDuckGo HTML parsing against a captured fixture, Tavily request/response shape, every error path, and the guarantee that both secrets never reach stdout, and that all 69 specified
+roles exist with complete fields and switch cleanly.
 
 ## Editing the prompt
 
